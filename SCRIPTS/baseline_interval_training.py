@@ -4,10 +4,38 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from pathlib import Path
+from SCRIPTS.config import BASELINE_INTERVAL_ATTENTION_DIR, create_directories, LOSS_WEIGHTS, TRAINING_CONFIG
 
 
-def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=100, 
-                                  lr=0.001, recon_weight=0.3, device='cuda'):
+def save_attention_weights(model, split_type, model_type='baseline_interval', latent_dim=None, trial=None):
+    create_directories()
+    attention_weights = model.node_attention.get_attention_weights()
+    
+    filename_parts = ['attention', split_type, model_type]
+    if latent_dim is not None:
+        filename_parts.append(f'{latent_dim}D')
+    if trial is not None:
+        filename_parts.append(f'trial{trial}')
+    filename = '_'.join(filename_parts) + '.pth'
+    
+    save_path = BASELINE_INTERVAL_ATTENTION_DIR / filename
+    torch.save({
+        'attention_weights': attention_weights,
+        'model_type': model_type,
+        'split_type': split_type,
+        'latent_dim': latent_dim,
+        'trial': trial
+    }, save_path)
+    print(f"✓ Attention weights saved to {save_path}")
+    return save_path
+
+
+def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=None, 
+                                  lr=None, recon_weight=None, device='cuda', split_type='subject', latent_dim=None, trial=None):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
+    lr = lr or TRAINING_CONFIG['learning_rate']
+    recon_weight = recon_weight or LOSS_WEIGHTS['reconstruction']
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion_recon = nn.MSELoss()
@@ -39,11 +67,20 @@ def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=1
             labels = labels.to(device)
             
             optimizer.zero_grad()
-            reconstructions, latent_sequence, logits = model(features)
+            model_output = model(features)
+            reconstructions = model_output['aux']['reconstruction']
+            logits = model_output['logits']
             
+            # Compute individual losses
             loss_recon = criterion_recon(reconstructions, features)
             loss_class = criterion_class(logits, labels)
-            loss = recon_weight * loss_recon + (1 - recon_weight) * loss_class
+            
+            # Use unified loss aggregation
+            losses = {
+                'reconstruction': loss_recon,
+                'classification': loss_class
+            }
+            loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
             
             loss.backward()
             
@@ -73,11 +110,20 @@ def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=1
                 features = features.to(device)
                 labels = labels.to(device)
                 
-                reconstructions, latent_sequence, logits = model(features)
+                model_output = model(features)
+                reconstructions = model_output['aux']['reconstruction']
+                logits = model_output['logits']
                 
+                # Compute individual losses
                 loss_recon = criterion_recon(reconstructions, features)
                 loss_class = criterion_class(logits, labels)
-                loss = recon_weight * loss_recon + (1 - recon_weight) * loss_class
+                
+                # Use unified loss aggregation
+                losses = {
+                    'reconstruction': loss_recon,
+                    'classification': loss_class
+                }
+                loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
                 
                 val_loss += loss.item()
                 val_recon_loss += loss_recon.item()
@@ -134,7 +180,8 @@ def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=1
             features, labels, _, _ = batch
             features = features.to(device)
             
-            _, _, logits = model(features)
+            model_output = model(features)
+            logits = model_output['logits']
             _, predicted = torch.max(logits.data, 1)
             
             val_predictions.extend(predicted.cpu().numpy())
@@ -143,6 +190,9 @@ def train_baseline_interval_model(model, train_loader, test_loader, num_epochs=1
     print("\nFinal Classification Report:")
     print(classification_report(val_labels, val_predictions, 
                               target_names=['Rest', 'Improv', 'Scale']))
+    
+    # Save attention weights
+    save_attention_weights(model, split_type, 'baseline_interval', latent_dim, trial)
     
     return model, history
 
@@ -160,7 +210,10 @@ def evaluate_baseline_interval_model(model, test_loader, device='cuda'):
             features, batch_labels, _, _ = batch
             features = features.to(device)
             
-            reconstructions, latent_sequence, logits = model(features)
+            model_output = model(features)
+            reconstructions = model_output['aux']['reconstruction']
+            latent_sequence = model_output['aux']['latent']
+            logits = model_output['logits']
             
             _, predicted = torch.max(logits.data, 1)
             

@@ -7,7 +7,6 @@ from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
-
 import tphate
 from SCRIPTS.config import (
     PREPARED_FNIRS_DIR, SCATTERING_DIR, THRESHOLD, TASK_SEGMENTS, 
@@ -305,7 +304,6 @@ def prepare_data(
     return train_loader, test_loader
 
 
-# Preps data for interval based analysis
 def prepare_interval_data(
     scattering_data_path,
     split_type='subject',

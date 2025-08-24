@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch_topological.nn import VietorisRipsComplex
 
 class TopologicalModel(nn.Module):
     def __init__(self, input_dim=768, latent_dim=48, num_classes=3):
         super().__init__()
-        self.node_alphas = nn.Parameter(torch.ones(48))
+        self.node_alphas = nn.Parameter(torch.randn(48) * 0.5)
         
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, 512),
@@ -93,7 +94,8 @@ class TopologicalModel(nn.Module):
         batch_size, seq_len, input_dim = x.shape
         
         x_4d = x.view(batch_size, seq_len, 48, 16)
-        alphas = torch.sigmoid(self.node_alphas).view(1, 1, 48, 1)
+        # Use raw learned parameters with abs to ensure positive weights
+        alphas = torch.abs(self.node_alphas).view(1, 1, 48, 1)
         x_weighted = (x_4d * alphas).view(batch_size, seq_len, input_dim)
         
         x_flat = x_weighted.view(-1, input_dim)
@@ -107,4 +109,13 @@ class TopologicalModel(nn.Module):
         
         logits = self.classifier(topo_features)
         
-        return x_recon, logits, z, topo_features
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z,
+                'topo_features': topo_features
+            }
+        }

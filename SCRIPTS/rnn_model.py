@@ -1,20 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-class NodeAttention(nn.Module):
-    def __init__(self, num_nodes=48):
-        super().__init__()
-        self.alphas = nn.Parameter(torch.ones(num_nodes))
-        
-    def forward(self, x):
-        batch_size, seq_len, _ = x.shape
-        x = x.view(batch_size, seq_len, 48, 16)
-        alphas_expanded = self.alphas.view(1, 1, -1, 1)
-        weighted_features = x * alphas_expanded
-        
-        return weighted_features.reshape(batch_size, seq_len, -1)
+from SCRIPTS.attention import NodeAttention
 
 class AttentionLSTMClassifier(nn.Module):
     def __init__(self, input_dim=768, latent_dim=48, hidden_dim=128, num_classes=3, dropout=0.3):
@@ -77,4 +64,13 @@ class AttentionLSTMClassifier(nn.Module):
         
         logits = self.classifier(h_n)
         
-        return x_recon, logits, z
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z,
+                'lstm_out': lstm_out
+            }
+        }

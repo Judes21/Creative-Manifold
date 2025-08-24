@@ -6,6 +6,35 @@ import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from pathlib import Path
+from SCRIPTS.config import RNN_ATTENTION_DIR, create_directories, LOSS_WEIGHTS, TRAINING_CONFIG
+
+
+def save_attention_weights(model, split_type, model_type='rnn', latent_dim=None, trial=None):
+    create_directories()
+    attention_weights = model.node_attention.get_attention_weights()
+    
+    if np.std(attention_weights) < 0.001:
+        print(f"Warning: Very uniform weights detected!") #Debugging error w/ attention
+
+    filename_parts = ['attention', split_type, model_type]
+    if latent_dim is not None:
+        filename_parts.append(f'{latent_dim}D')
+    if trial is not None:
+        filename_parts.append(f'trial{trial}')
+    filename = '_'.join(filename_parts) + '.pth'
+    
+    save_path = RNN_ATTENTION_DIR / filename
+    torch.save({
+        'attention_weights': attention_weights,
+        'model_type': model_type,
+        'split_type': split_type,
+        'latent_dim': latent_dim,
+        'trial': trial
+    }, save_path)
+    print(f"✓ Attention weights saved to {save_path}")
+    return save_path
+
 
 #Weighted sampler for class balance
 def create_balanced_sampler(dataset):
@@ -22,7 +51,10 @@ def create_balanced_sampler(dataset):
     return sampler, class_weights
 
 
-def train_rnn_model(model, train_loader, test_loader, num_epochs=50, lr=0.001, recon_weight=0.3, device=None):
+def train_rnn_model(model, train_loader, test_loader, num_epochs=None, lr=None, recon_weight=None, device=None, split_type='subject', latent_dim=None, trial=None):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
+    lr = lr or TRAINING_CONFIG['learning_rate']
+    recon_weight = recon_weight or LOSS_WEIGHTS['reconstruction']
     device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     criterion_recon = nn.MSELoss()
@@ -50,11 +82,16 @@ def train_rnn_model(model, train_loader, test_loader, num_epochs=50, lr=0.001, r
         for features, labels, _, _ in train_loader:
             features, labels = features.to(device), labels.to(device)
             
-            x_recon, logits, z = model(features)
-            
+            model_output = model(features)
+            x_recon = model_output['aux']['reconstruction']
+            logits = model_output['logits']
             loss_recon = criterion_recon(x_recon, features)
             loss_class = criterion_class(logits, labels)
-            loss = recon_weight * loss_recon + (1 - recon_weight) * loss_class
+            losses = {
+                'reconstruction': loss_recon,
+                'classification': loss_class
+            }
+            loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
             
             optimizer.zero_grad()
             loss.backward()
@@ -81,11 +118,20 @@ def train_rnn_model(model, train_loader, test_loader, num_epochs=50, lr=0.001, r
             for features, labels, _, _ in test_loader:
                 features, labels = features.to(device), labels.to(device)
                 
-                x_recon, logits, _ = model(features)
+                model_output = model(features)
+                x_recon = model_output['aux']['reconstruction']
+                logits = model_output['logits']
                 
+                # Compute individual losses
                 loss_recon = criterion_recon(x_recon, features)
                 loss_class = criterion_class(logits, labels)
-                loss = recon_weight * loss_recon + (1 - recon_weight) * loss_class
+                
+                # Use unified loss aggregation
+                losses = {
+                    'reconstruction': loss_recon,
+                    'classification': loss_class
+                }
+                loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
                 
                 val_loss += loss.item()
                 _, predicted = torch.max(logits, 1)
@@ -126,5 +172,8 @@ def train_rnn_model(model, train_loader, test_loader, num_epochs=50, lr=0.001, r
     print("\nClassification Report:")
     print(classification_report(val_labels, val_preds, 
                               target_names=['Rest', 'Improv', 'Scale']))
+    
+    # Save attention weights
+    save_attention_weights(model, split_type, 'rnn', latent_dim, trial)
     
     return model, history

@@ -25,7 +25,7 @@ def load_latent_embeddings(results_dir, latent_dims):
     for latent_dim in latent_dims:
         embeddings_dict[latent_dim] = {}
         
-        # Load subject-withheld model
+        # Load data
         subject_path = results_dir / f'subject_withheld_model_latent{latent_dim}.pth'
         if subject_path.exists():
             subject_results = torch.load(subject_path, map_location=device)
@@ -45,7 +45,6 @@ def load_latent_embeddings(results_dir, latent_dims):
                 'subjects': all_subject_ids
             }
         
-        # Load time-withheld model
         time_path = results_dir / f'time_withheld_model_latent{latent_dim}.pth'
         if time_path.exists():
             time_results = torch.load(time_path, map_location=device)
@@ -75,7 +74,6 @@ def visualize_latent_space(latent_space, labels, subjects, split_type, latent_di
     labels = np.array(labels)
     subjects = np.array(subjects)
     
-    # Filter out rest if requested
     if not include_rest:
         non_rest_mask = labels != 0
         latent_space = latent_space[non_rest_mask]
@@ -172,22 +170,20 @@ def plot_latent_trajectories(embeddings, labels, subject_id, output_path=None):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     
-    # Color mapping
     colors = {0: 'blue', 1: 'red', 2: 'green'}
     labels_text = {0: 'Rest', 1: 'Improv', 2: 'Scale'}
     
-    # Plot trajectory
     for i in range(len(embed_3d) - 1):
         ax.plot(embed_3d[i:i+2, 0], 
                 embed_3d[i:i+2, 1], 
                 embed_3d[i:i+2, 2],
                 color=colors[labels[i]], alpha=0.6, linewidth=2)
     
-    # Add start and end markers
+
     ax.scatter(*embed_3d[0], color='black', s=100, marker='o', label='Start')
     ax.scatter(*embed_3d[-1], color='black', s=100, marker='s', label='End')
     
-    # Create legend
+
     legend_elements = [Line2D([0], [0], color=colors[i], lw=4, label=labels_text[i]) 
                       for i in range(3)]
     legend_elements.extend([
@@ -209,7 +205,6 @@ def plot_latent_trajectories(embeddings, labels, subject_id, output_path=None):
 
 
 def plot_tphate_trajectories(embeddings_dict, split_type, latent_dim, save_path=None):
-    # Determine grid size based on number of subjects
     n_subjects = len(embeddings_dict)
     n_cols = 4
     n_rows = (n_subjects + n_cols - 1) // n_cols
@@ -217,7 +212,6 @@ def plot_tphate_trajectories(embeddings_dict, split_type, latent_dim, save_path=
     fig = plt.figure(figsize=(4*n_cols, 4*n_rows))
     
     for idx, (subject, data) in enumerate(embeddings_dict.items()):
-        # Get embeddings and sort by time
         embeddings = np.array(data['embeddings'])
         labels = np.array(data['labels'])
         n_timepoints = len(embeddings)
@@ -226,10 +220,9 @@ def plot_tphate_trajectories(embeddings_dict, split_type, latent_dim, save_path=
         print(f"Computing T-PHATE for subject {subject}...")
         tphate_coords = compute_tphate_embedding(embeddings, n_components=3)
         
-        # Create subplot
+        
         ax = fig.add_subplot(n_rows, n_cols, idx + 1, projection='3d')
         
-        # Color by time
         timepoints = np.arange(n_timepoints)
         scatter = ax.scatter(tphate_coords[:, 0], 
                            tphate_coords[:, 1], 
@@ -239,7 +232,6 @@ def plot_tphate_trajectories(embeddings_dict, split_type, latent_dim, save_path=
                            alpha=0.8, 
                            s=10)
         
-        # Plot trajectory line
         ax.plot(tphate_coords[:, 0], 
                tphate_coords[:, 1], 
                tphate_coords[:, 2], 
@@ -267,7 +259,6 @@ class TaskIntervalVisualizer:
         self.load_models()
         
     def load_models(self):
-        # Load saved autoencoder results
         if self.split_type in ['subject', 'both']:
             subject_path = EXTENDED_LATENT_RESULTS_DIR / f'subject_withheld_model_latent{self.latent_dim}.pth'
             if subject_path.exists():
@@ -319,22 +310,20 @@ class TaskIntervalVisualizer:
             return None
             
         if method == 'phate':
-            # PHATE with less smoothing
             phate_op = phate.PHATE(
                 n_components=3, 
                 n_jobs=-1, 
                 random_state=42,
-                knn=6,  # Smaller neighborhood
-                decay=40,  # Faster decay
-                t=5,  # Smaller diffusion time
+                knn=6, 
+                decay=40,  
+                t=5,  
                 **kwargs
             )
             return phate_op.fit_transform(data)
             
         if method == 'tphate':
-            # t-PHATE with minimal smoothing for short sequences
             if len(data) < 10:
-                # For very short sequences, use regular PHATE instead
+                
                 phate_op = phate.PHATE(
                     n_components=3, 
                     n_jobs=-1, 
@@ -348,10 +337,10 @@ class TaskIntervalVisualizer:
                 tphate_op = tphate.TPHATE(
                     n_components=3, 
                     n_jobs=-1,
-                    t=1,  # Minimal diffusion
-                    smooth_window=1,  # No smoothing
-                    knn=3,  # Small neighborhood
-                    decay=20,  # Fast decay
+                    t=1,  
+                    smooth_window=1, 
+                    knn=3, 
+                    decay=20, 
                     mds='metric',
                     mds_solver='sgd',
                     random_state=42,
@@ -365,7 +354,6 @@ class TaskIntervalVisualizer:
             
         if method == 'tsne':
             n = len(data)
-            # Adjust perplexity based on data size
             perp = min(30, max(5, n//4)) if n > 15 else min(n-1, 5)
             tsne = TSNE(
                 n_components=3, 
@@ -388,7 +376,6 @@ class TaskIntervalVisualizer:
         figsize=(20, 16),
         verbose=False
     ):
-        # Pick split
         if self.split_type == 'both':
             split = 'subject' if 'subject' in self.models_data else 'time'
         else:
@@ -396,7 +383,6 @@ class TaskIntervalVisualizer:
         if split not in self.models_data:
             raise ValueError(f"No model data for split: {split}")
 
-        # Pick subject
         subjects = self.get_available_subjects(split)
         if not subjects:
             raise ValueError("No subjects available")
@@ -404,7 +390,6 @@ class TaskIntervalVisualizer:
             subject_id = subjects[0]
             print(f"Using subject: {subject_id}")
 
-        # Load embeddings & times
         hist = self.models_data[split]['history']
         E = np.array(hist['embeddings'][subject_id])
         T = np.array(hist['time_indices'][subject_id])
@@ -414,14 +399,11 @@ class TaskIntervalVisualizer:
         tasks = ['REST', 'IMPROV', 'SCALE']
         intervals_list = [rest_intervals, improv_intervals, scale_intervals]
 
-        # Setup figure with better spacing
         fig = plt.figure(figsize=figsize, constrained_layout=False)
         
-        # Add more top margin for task headers
         gs = fig.add_gridspec(4, 7, left=0.08, right=0.95, top=0.92, bottom=0.05,
                              width_ratios=[1]*6 + [0.05], hspace=0.3, wspace=0.25)
         
-        # Main title
         fig.suptitle(
             f'Task Interval Visualizations — Subject {subject_id} (Latent Dim: {self.latent_dim})',
             fontsize=20, y=0.98
@@ -437,12 +419,12 @@ class TaskIntervalVisualizer:
                     data, times_norm = self.extract_task_interval(E, T, interval)
                     
                     if data is not None and len(data) > 3:  # Need at least 4 points
-                        if verbose and i == 0 and k == 0:  # Print once per task type
+                        if verbose and i == 0 and k == 0: 
                             print(f"\n{interval}: {len(data)} timepoints")
                             print(f"  Data shape: {data.shape}")
                             print(f"  Data variance: {np.var(data, axis=0).mean():.4f}")
                         
-                        if verbose and m == 'tphate' and k == 0:  # Print for t-PHATE
+                        if verbose and m == 'tphate' and k == 0: 
                             if len(data) < 10:
                                 print(f"  Note: Using PHATE instead of t-PHATE for {interval} (only {len(data)} points)")
                         
@@ -475,13 +457,11 @@ class TaskIntervalVisualizer:
             fig.text(0.02, y_pos, mname, rotation=90, ha='center', va='center',
                     fontsize=16, fontweight='bold')
 
-        # Add task headers at the top
         task_x_positions = [0.23, 0.50, 0.77]
         for j, (task, x_pos) in enumerate(zip(tasks, task_x_positions)):
             fig.text(x_pos, 0.95, task, ha='center', va='bottom',
                     fontsize=18, fontweight='bold')
 
-        # Single colorbar
         if scatter_ref is not None:
             cax = fig.add_subplot(gs[:, -1])
             cbar = fig.colorbar(scatter_ref, cax=cax, orientation='vertical')
@@ -489,7 +469,6 @@ class TaskIntervalVisualizer:
             cbar.ax.tick_params(labelsize=11)
             cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
 
-        # Save & show
         if save_path:
             dir_path = os.path.dirname(save_path)
             os.makedirs(dir_path, exist_ok=True)

@@ -28,6 +28,17 @@ CURVATURE_RESULTS_DIR = CROSS_VALIDATION_RESULTS_DIR / "curvature_results"
 WEIGHT_VIZ_RESULTS_DIR = FINAL_VISUALIZATION_RESULTS_DIR / "attention_weights"
 METHOD_COMPARISON_VIZ_RESULTS_DIR = FINAL_VISUALIZATION_RESULTS_DIR / "method_comparisons"
 BASELINE_INTERVAL_RESULTS_DIR = CROSS_VALIDATION_RESULTS_DIR  / "baseline_interval_results"
+CHECKPOINTS_DIR = RESULTS_ROOT / "model_checkpoints"
+COMBINED_MODEL_RESULTS_DIR = CROSS_VALIDATION_RESULTS_DIR / "combined_results"
+
+# ATTENTION WEIGHT DIRECTORIES (organized by model)
+ATTENTION_WEIGHTS_DIR = ATTENTION_RESULTS_DIR
+BASELINE_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "baseline"
+BASELINE_INTERVAL_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "baseline_interval"
+RNN_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "rnn"
+TOPOLOGICAL_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "topological"
+CURVATURE_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "curvature"
+COMBINED_ATTENTION_DIR = ATTENTION_WEIGHTS_DIR / "combined"
 
 
 # PARAMETERS
@@ -40,9 +51,36 @@ ALPHA = 0.7
 DEFAULT_BATCH_SIZE = 32
 DEFAULT_LEARNING_RATE = 0.001
 DEFAULT_EPOCHS = 100
-DEFAULT_DROPOUT_RATE = 0.2
+DEFAULT_DROPOUT_RATE = 0.3
 EXPECTED_FNIRS_SHAPE = (7850, 48)  #48 fnirs channels
 EXPECTED_SCATTERING_SHAPE = (7850, 768)  #768 scattering coefficients
+
+BASE_CONFIG = {
+    'batch_size': 32,
+    'learning_rate': 0.001,
+    'weight_decay': 1e-4,
+    'dropout': 0.3,
+    'epochs': 100,
+    'seed': 42
+}
+
+LOSS_WEIGHTS = {
+    'classification': 0.6,
+    'reconstruction': 0.4,
+    'kld': 0,
+    'curvature': 0.2,      
+    'topological': 0.2 
+}
+
+TRAINING_CONFIG = {
+    'batch_size': 32,
+    'learning_rate': 0.001,
+    'weight_decay': 1e-4,
+    'dropout': 0.3,
+    'epochs': 100,
+    'seed': 42
+}
+
 
 # TASK STRUCTURE (based on Tachibana's experimental paradigm)
 TASK_SEGMENTS = [
@@ -100,7 +138,16 @@ def create_directories():
         TOPOLOGICAL_RESULTS_DIR,
         RNN_RESULTS_DIR,
         CURVATURE_RESULTS_DIR,
-        METHOD_COMPARISON_VIZ_RESULTS_DIR
+        METHOD_COMPARISON_VIZ_RESULTS_DIR,
+        CHECKPOINTS_DIR,
+        COMBINED_MODEL_RESULTS_DIR,
+        # Attention weight directories
+        BASELINE_ATTENTION_DIR,
+        BASELINE_INTERVAL_ATTENTION_DIR,
+        RNN_ATTENTION_DIR,
+        TOPOLOGICAL_ATTENTION_DIR,
+        CURVATURE_ATTENTION_DIR,
+        COMBINED_ATTENTION_DIR
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)

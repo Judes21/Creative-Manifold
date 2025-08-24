@@ -6,9 +6,35 @@ import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from pathlib import Path
+from SCRIPTS.config import TOPOLOGICAL_ATTENTION_DIR, create_directories, LOSS_WEIGHTS, TRAINING_CONFIG
 
 
-def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=0.001, device=None):
+def save_attention_weights(model, split_type, model_type='topological', latent_dim=None, trial=None):
+    create_directories()
+    attention_weights = torch.abs(model.node_alphas).detach().cpu().numpy()
+    filename_parts = ['attention', split_type, model_type]
+    if latent_dim is not None:
+        filename_parts.append(f'{latent_dim}D')
+    if trial is not None:
+        filename_parts.append(f'trial{trial}')
+    filename = '_'.join(filename_parts) + '.pth'
+    
+    save_path = TOPOLOGICAL_ATTENTION_DIR / filename
+    torch.save({
+        'attention_weights': attention_weights,
+        'model_type': model_type,
+        'split_type': split_type,
+        'latent_dim': latent_dim,
+        'trial': trial
+    }, save_path)
+    print(f"✓ Attention weights saved to {save_path}")
+    return save_path
+
+
+def train_topological_model(model, train_loader, test_loader, num_epochs=None, lr=None, device=None, split_type='subject', latent_dim=None, trial=None):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
+    lr = lr or TRAINING_CONFIG['learning_rate']
     device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -30,16 +56,28 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
         train_total = 0
         train_recon_loss = 0
         train_class_loss = 0
+        train_topo_loss = 0
         
         for features, labels, _, _ in train_loader:
             features = features.to(device)
             labels = labels.to(device)
             
-            x_recon, logits, z, topo_features = model(features)
+            model_output = model(features)
+            x_recon = model_output['aux']['reconstruction']
+            logits = model_output['logits']
+            z = model_output['aux']['latent']
+            topo_features = model_output['aux']['topo_features']
         
             loss_recon = criterion_recon(x_recon, features)
             loss_class = criterion_class(logits, labels)
-            total_loss = loss_recon + loss_class
+            loss_topo = torch.mean(topo_features ** 2)
+            
+            losses = {
+                'reconstruction': loss_recon,
+                'classification': loss_class,
+                'topological': loss_topo
+            }
+            total_loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
             
             optimizer.zero_grad()
             total_loss.backward()
@@ -49,6 +87,7 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
             train_loss += total_loss.item()
             train_recon_loss += loss_recon.item()
             train_class_loss += loss_class.item()
+            train_topo_loss += loss_topo.item()
             _, predicted = torch.max(logits, 1)
             train_correct += (predicted == labels).sum().item()
             train_total += labels.size(0)
@@ -65,11 +104,22 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
                 features = features.to(device)
                 labels = labels.to(device)
                 
-                x_recon, logits, z, topo_features = model(features)
+                model_output = model(features)
+                x_recon = model_output['aux']['reconstruction']
+                logits = model_output['logits']
+                z = model_output['aux']['latent']
+                topo_features = model_output['aux']['topo_features']
                 
+                # Compute individual losses
                 loss_recon = criterion_recon(x_recon, features)
                 loss_class = criterion_class(logits, labels)
-                total_loss = loss_recon + loss_class
+                loss_topo = torch.mean(topo_features ** 2)
+                losses = {
+                    'reconstruction': loss_recon,
+                    'classification': loss_class,
+                    'topological': loss_topo
+                }
+                total_loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
                 
                 val_loss += total_loss.item()
                 _, predicted = torch.max(logits, 1)
@@ -89,9 +139,8 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
         history['recon_loss'].append(train_recon_loss / len(train_loader))
         history['class_loss'].append(train_class_loss / len(train_loader))
         
-        # Save attention weights
         if hasattr(model, 'node_alphas'):
-            attention_weights = torch.sigmoid(model.node_alphas).detach().cpu().numpy()
+            attention_weights = F.softmax(model.node_alphas, dim=0).detach().cpu().numpy()
             history['attention_weights'].append(attention_weights.copy())
         
         # Progress update
@@ -102,10 +151,6 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
             print(f"  Recon Loss: {train_recon_loss/len(train_loader):.4f}, "
                   f"Class Loss: {train_class_loss/len(train_loader):.4f}")
             print(f"  Predicting classes: {unique_preds}")
-            
-            # Check for model collapse
-            if len(unique_preds) < 3:
-                print(f"  ⚠️  Mode collapse detected! Only predicting {len(unique_preds)} classes")
     
     print(f"\nFinal Results:")
     print(f"  Train Accuracy: {history['train_acc'][-1]:.1f}%")
@@ -114,5 +159,8 @@ def train_topological_model(model, train_loader, test_loader, num_epochs=50, lr=
     print("\nClassification Report:")
     print(classification_report(val_labels, val_preds, 
                               target_names=['Rest', 'Improv', 'Scale']))
+    
+    # Save attention weights
+    save_attention_weights(model, split_type, 'topological', latent_dim, trial)
     
     return model, history, val_preds, val_labels

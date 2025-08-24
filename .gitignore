@@ -1,10 +1,6 @@
 # Ignore oversized data file that's breaking the push
 DATA/SCATTERING_COEFFICIENTS/combined_scattering_data.csv
 
-# # Ignore any other potentially massive scattering outputs
-# *.pkl
-# *.h5
-
 # Optional: Ignore system and notebook clutter
 .DS_Store
 __pycache__/

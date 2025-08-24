@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 #Simple MLP for classification
 class BrainStateClassifier(nn.Module):
@@ -16,7 +17,13 @@ class BrainStateClassifier(nn.Module):
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.model(x)
+        logits = self.model(x)
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {}
+        }
 
 #Compress features to latent space
 class BrainStateAutoencoder(nn.Module):
@@ -45,7 +52,15 @@ class BrainStateAutoencoder(nn.Module):
     def forward(self, x):
         z = self.encoder(x)
         x_recon = self.decoder(z)
-        return x_recon, z
+        return {
+            'logits': None,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z
+            }
+        }
 
 
 # Combined autoencoder + classifier
@@ -63,22 +78,35 @@ class BrainStateFullModel(nn.Module):
         )
         
     def forward(self, x):
-        x_recon, z = self.autoencoder(x)
+        autoencoder_output = self.autoencoder(x)
+        x_recon = autoencoder_output['aux']['reconstruction']
+        z = autoencoder_output['aux']['latent']
         logits = self.classifier(z)
-        return x_recon, z, logits
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z
+            }
+        }
 
 
 # Node-level attention on fNIRS channels
 class NodeAttention(nn.Module):
     def __init__(self, num_nodes=48):
         super().__init__()
-        self.alphas = nn.Parameter(torch.ones(num_nodes))
+        self.alphas = nn.Parameter(torch.randn(num_nodes) * 0.1)
         
     def forward(self, x):
+        # Always use softmax for proper probability distribution
+        attention_weights = F.softmax(self.alphas, dim=0)
+        
         if len(x.shape) == 2:
             batch_size = x.size(0)
             x = x.view(batch_size, 48, 16)  # Reshape to nodes x features
-        alphas_expanded = self.alphas.view(1, -1, 1)
+        alphas_expanded = attention_weights.view(1, -1, 1)
         weighted_features = x * alphas_expanded
         
         if len(x.shape) == 2:
@@ -119,7 +147,15 @@ class AttentionAutoencoder(nn.Module):
 
         z = self.encoder(x)
         x_recon = self.decoder(z)
-        return x_recon, z
+        return {
+            'logits': None,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z
+            }
+        }
 
 
 # Full model
@@ -137,6 +173,16 @@ class AttentionFullModel(nn.Module):
         )
     
     def forward(self, x):
-        x_recon, z = self.autoencoder(x)
+        autoencoder_output = self.autoencoder(x)
+        x_recon = autoencoder_output['aux']['reconstruction']
+        z = autoencoder_output['aux']['latent']
         logits = self.classifier(z)
-        return x_recon, z, logits
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z
+            }
+        }

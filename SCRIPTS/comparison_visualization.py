@@ -11,7 +11,8 @@ from SCRIPTS.config import (
     CURVATURE_RESULTS_DIR, 
     RNN_RESULTS_DIR, 
     FINAL_VISUALIZATION_RESULTS_DIR,
-    BASELINE_INTERVAL_RESULTS_DIR
+    BASELINE_INTERVAL_RESULTS_DIR,
+    COMBINED_MODEL_RESULTS_DIR
 )
 
 
@@ -194,12 +195,16 @@ def compare_interval_methods(baseline_interval_results=None, output_path=None):
         'Curvature': {
             'methods': ['Curvature 8D', 'Curvature 48D'],
             'colors': ['#e377c2', '#7f7f7f']
+        },
+        'Combined': {
+            'methods': ['Combined 8D', 'Combined 48D'],
+            'colors': ['#17becf', '#bcbd22']
         }
     }
     
     methods_ordered = []
     all_colors = []
-    for group in ['Baseline Interval', 'Topological', 'RNN', 'Curvature']:
+    for group in ['Baseline Interval', 'Topological', 'RNN', 'Curvature', 'Combined']:
         methods_ordered.extend(method_groups[group]['methods'])
         all_colors.extend(method_groups[group]['colors'])
     
@@ -236,7 +241,9 @@ def compare_interval_methods(baseline_interval_results=None, output_path=None):
         'RNN 8D': (RNN_RESULTS_DIR, 'rnn_subject_8d_cv_results.pkl', 'rnn_time_8d_cv_results.pkl'),
         'RNN 48D': (RNN_RESULTS_DIR, 'rnn_subject_48d_cv_results.pkl', 'rnn_time_48d_cv_results.pkl'),
         'Curvature 8D': (CURVATURE_RESULTS_DIR, 'curvature_subject_8d_cv_results.pkl', 'curvature_time_8d_cv_results.pkl'),
-        'Curvature 48D': (CURVATURE_RESULTS_DIR, 'curvature_subject_48d_cv_results.pkl', 'curvature_time_48d_cv_results.pkl')
+        'Curvature 48D': (CURVATURE_RESULTS_DIR, 'curvature_subject_48d_cv_results.pkl', 'curvature_time_48d_cv_results.pkl'),
+        'NeuroMuse 8D': (COMBINED_MODEL_RESULTS_DIR, 'combined_v2_subject_8d_cv_results.pkl', 'combined_v2_time_8d_cv_results.pkl'),
+        'NeuroMuse 48D': (COMBINED_MODEL_RESULTS_DIR, 'combined_v2_subject_48d_cv_results.pkl', 'combined_v2_time_48d_cv_results.pkl')
     }
     
     for method_name, (results_dir, subject_file, time_file) in interval_methods.items():
@@ -351,4 +358,338 @@ def compare_interval_methods(baseline_interval_results=None, output_path=None):
     plt.show()
     
     print(f"Interval comparison saved to: {output_path}")
+    return results
+
+
+def compare_interval_methods_8D(baseline_interval_results=None, output_path=None):
+    if output_path is None:
+        output_path = FINAL_VISUALIZATION_RESULTS_DIR / "method_comparisons" / "interval_comparison_8D.png"
+    
+    # Group methods by colors - only 8D methods
+    method_groups = {
+        'Latent Trajectory': {
+            'methods': ['Latent Trajectory 8D'],
+            'colors': ['#2E86AB']  # Deep blue
+        },
+        'Topological': {
+            'methods': ['Topological 8D'],
+            'colors': ['#A23B72']  # Magenta
+        },
+        'RNN': {
+            'methods': ['RNN 8D'],
+            'colors': ['#F18F01']  # Orange
+        },
+        'Curvature': {
+            'methods': ['Curvature 8D'],
+            'colors': ['#C73E1D']  # Red-orange
+        },
+        'NeuroMuse': {
+            'methods': ['NeuroMuse 8D'],
+            'colors': ['#6A994E']  # Green
+        }
+    }
+    
+    methods_ordered = []
+    all_colors = []
+    for group in ['Latent Trajectory', 'Topological', 'RNN', 'Curvature', 'NeuroMuse']:
+        methods_ordered.extend(method_groups[group]['methods'])
+        all_colors.extend(method_groups[group]['colors'])
+    
+    results = {method: {'subject': None, 'time': None} for method in methods_ordered}
+
+    if baseline_interval_results:
+        results['Latent Trajectory 8D'] = {
+            'subject': baseline_interval_results[8]['subject'],
+            'time': baseline_interval_results[8]['time']
+        }
+    else:
+        baseline_file = BASELINE_RESULTS_DIR / 'baseline_interval_cv_results.pkl'
+        if baseline_file.exists():
+            with open(baseline_file, 'rb') as f:
+                baseline_data = pickle.load(f)
+            if isinstance(baseline_data, dict) and 8 in baseline_data:
+                results['Latent Trajectory 8D'] = {
+                    'subject': baseline_data[8]['subject'],
+                    'time': baseline_data[8]['time']
+                }
+    
+    interval_methods = {
+        'Topological 8D': (TOPOLOGICAL_RESULTS_DIR, 'topological_subject_8d_cv_results.pkl', 'topological_time_8d_cv_results.pkl'),
+        'RNN 8D': (RNN_RESULTS_DIR, 'rnn_subject_8d_cv_results.pkl', 'rnn_time_8d_cv_results.pkl'),
+        'Curvature 8D': (CURVATURE_RESULTS_DIR, 'curvature_subject_8d_cv_results.pkl', 'curvature_time_8d_cv_results.pkl'),
+        'NeuroMuse 8D': (COMBINED_MODEL_RESULTS_DIR, 'combined_v2_subject_8d_cv_results.pkl', 'combined_v2_time_8d_cv_results.pkl')
+    }
+    
+    for method_name, (results_dir, subject_file, time_file) in interval_methods.items():
+        subject_path = results_dir / subject_file
+        if subject_path.exists():
+            with open(subject_path, 'rb') as f:
+                results[method_name]['subject'] = pickle.load(f)
+        else:
+            print(f"Warning: {subject_path} not found")
+        
+        time_path = results_dir / time_file
+        if time_path.exists():
+            with open(time_path, 'rb') as f:
+                results[method_name]['time'] = pickle.load(f)
+        else:
+            print(f"Warning: {time_path} not found")
+    
+    subject_means = []
+    subject_stds = []
+    time_means = []
+    time_stds = []
+    
+    for method in methods_ordered:
+        if results[method]['subject'] is not None:
+            subj_mean = results[method]['subject']['mean_accuracy']
+            subj_std = results[method]['subject']['std_accuracy']
+            subject_means.append(subj_mean)
+            subject_stds.append(subj_std)
+        else:
+            subject_means.append(0)
+            subject_stds.append(0)
+            
+        if results[method]['time'] is not None:
+            time_mean = results[method]['time']['mean_accuracy']
+            time_std = results[method]['time']['std_accuracy']
+            time_means.append(time_mean)
+            time_stds.append(time_std)
+        else:
+            time_means.append(0)
+            time_stds.append(0)
+    
+    fig = plt.figure(figsize=(12, 5))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.15,
+                          left=0.08, right=0.92, top=0.85, bottom=0.15)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+    
+    x = np.arange(len(methods_ordered)) * 0.8 
+    width = 0.7 
+
+    # Subject-withheld
+    bars1 = ax1.bar(x, subject_means, width, 
+                     yerr=subject_stds, 
+                     capsize=6,
+                     color=all_colors, 
+                     edgecolor='white', 
+                     linewidth=1.5,
+                     error_kw={'linewidth': 1.5, 'ecolor': 'black', 'alpha': 0.7})
+    
+    ax1.set_title('Subject-Withheld Cross-Validation', fontsize=14, pad=10)
+    ax1.set_ylabel('Accuracy (%)', fontsize=12)
+    ax1.set_xticks(x)
+
+    clean_labels = [m.replace(' 8D', '') for m in methods_ordered]
+    ax1.set_xticklabels(clean_labels, rotation=45, ha='right', fontsize=10)
+    ax1.set_ylim(0, 105)
+
+
+    ax1.grid(False)
+    ax1.set_axisbelow(True)
+
+    for bar, val, std in zip(bars1, subject_means, subject_stds):
+        if val > 0:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2, height + std + 1.5,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    # Time-withheld
+    bars2 = ax2.bar(x, time_means, width, 
+                     yerr=time_stds, 
+                     capsize=6,
+                     color=all_colors, 
+                     edgecolor='white', 
+                     linewidth=1.5,
+                     error_kw={'linewidth': 1.5, 'ecolor': 'black', 'alpha': 0.7})
+    
+    ax2.set_title('Time-Withheld Cross-Validation', fontsize=14, pad=10)
+    ax2.set_ylabel('Accuracy (%)', fontsize=12)
+    ax2.set_xticks(x)
+
+    ax2.set_xticklabels(clean_labels, rotation=45, ha='right', fontsize=10)
+    ax2.set_ylim(0, 105)
+ 
+    ax2.grid(False)
+    ax2.set_axisbelow(True)
+    
+    for bar, val, std in zip(bars2, time_means, time_stds):
+        if val > 0:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2, height + std + 1.5,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    fig.suptitle('8D Interval-based Method Performance Comparison', fontsize=16, fontweight='bold')
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+    plt.show()
+    
+    print(f"8D Interval comparison saved to: {output_path}")
+    return results
+
+
+def compare_interval_methods_48D(baseline_interval_results=None, output_path=None):
+    if output_path is None:
+        output_path = FINAL_VISUALIZATION_RESULTS_DIR / "method_comparisons" / "interval_comparison_48D.png"
+    
+    # Group methods by colors - only 48D methods
+    method_groups = {
+        'Latent Trajectory': {
+            'methods': ['Latent Trajectory 48D'],
+            'colors': ['#2E86AB']  
+        },
+        'Topological': {
+            'methods': ['Topological 48D'],
+            'colors': ['#A23B72']  
+        },
+        'RNN': {
+            'methods': ['RNN 48D'],
+            'colors': ['#F18F01']  
+        },
+        'Curvature': {
+            'methods': ['Curvature 48D'],
+            'colors': ['#C73E1D'] 
+        },
+        'NeuroMuse': {
+            'methods': ['NeuroMuse 48D'],
+            'colors': ['#6A994E'] 
+        }
+    }
+    
+    methods_ordered = []
+    all_colors = []
+    for group in ['Latent Trajectory', 'Topological', 'RNN', 'Curvature', 'NeuroMuse']:
+        methods_ordered.extend(method_groups[group]['methods'])
+        all_colors.extend(method_groups[group]['colors'])
+    
+    results = {method: {'subject': None, 'time': None} for method in methods_ordered}
+
+    if baseline_interval_results:
+        results['Latent Trajectory 48D'] = {
+            'subject': baseline_interval_results[48]['subject'],
+            'time': baseline_interval_results[48]['time']
+        }
+    else:
+        baseline_file = BASELINE_RESULTS_DIR / 'baseline_interval_cv_results.pkl'
+        if baseline_file.exists():
+            with open(baseline_file, 'rb') as f:
+                baseline_data = pickle.load(f)
+            if isinstance(baseline_data, dict) and 48 in baseline_data:
+                results['Latent Trajectory 48D'] = {
+                    'subject': baseline_data[48]['subject'],
+                    'time': baseline_data[48]['time']
+                }
+    
+    interval_methods = {
+        'Topological 48D': (TOPOLOGICAL_RESULTS_DIR, 'topological_subject_48d_cv_results.pkl', 'topological_time_48d_cv_results.pkl'),
+        'RNN 48D': (RNN_RESULTS_DIR, 'rnn_subject_48d_cv_results.pkl', 'rnn_time_48d_cv_results.pkl'),
+        'Curvature 48D': (CURVATURE_RESULTS_DIR, 'curvature_subject_48d_cv_results.pkl', 'curvature_time_48d_cv_results.pkl'),
+        'NeuroMuse 48D': (COMBINED_MODEL_RESULTS_DIR, 'combined_v2_subject_48d_cv_results.pkl', 'combined_v2_time_48d_cv_results.pkl')
+    }
+    
+    for method_name, (results_dir, subject_file, time_file) in interval_methods.items():
+        subject_path = results_dir / subject_file
+        if subject_path.exists():
+            with open(subject_path, 'rb') as f:
+                results[method_name]['subject'] = pickle.load(f)
+        else:
+            print(f"Warning: {subject_path} not found")
+        
+        time_path = results_dir / time_file
+        if time_path.exists():
+            with open(time_path, 'rb') as f:
+                results[method_name]['time'] = pickle.load(f)
+        else:
+            print(f"Warning: {time_path} not found")
+    
+    subject_means = []
+    subject_stds = []
+    time_means = []
+    time_stds = []
+    
+    for method in methods_ordered:
+        if results[method]['subject'] is not None:
+            subj_mean = results[method]['subject']['mean_accuracy']
+            subj_std = results[method]['subject']['std_accuracy']
+            subject_means.append(subj_mean)
+            subject_stds.append(subj_std)
+        else:
+            subject_means.append(0)
+            subject_stds.append(0)
+            
+        if results[method]['time'] is not None:
+            time_mean = results[method]['time']['mean_accuracy']
+            time_std = results[method]['time']['std_accuracy']
+            time_means.append(time_mean)
+            time_stds.append(time_std)
+        else:
+            time_means.append(0)
+            time_stds.append(0)
+    
+    fig = plt.figure(figsize=(12, 5))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.15,
+                          left=0.08, right=0.92, top=0.85, bottom=0.15)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+    
+    x = np.arange(len(methods_ordered)) * 0.8 
+    width = 0.7 
+
+    # Subject-withheld
+    bars1 = ax1.bar(x, subject_means, width, 
+                     yerr=subject_stds, 
+                     capsize=6,
+                     color=all_colors, 
+                     edgecolor='white', 
+                     linewidth=1.5,
+                     error_kw={'linewidth': 1.5, 'ecolor': 'black', 'alpha': 0.7})
+    
+    ax1.set_title('Subject-Withheld Cross-Validation', fontsize=14, pad=10)
+    ax1.set_ylabel('Accuracy (%)', fontsize=12)
+    ax1.set_xticks(x)
+
+    clean_labels = [m.replace(' 48D', '') for m in methods_ordered]
+    ax1.set_xticklabels(clean_labels, rotation=45, ha='right', fontsize=10)
+    ax1.set_ylim(0, 105)
+
+    ax1.grid(False)
+    ax1.set_axisbelow(True)
+
+    for bar, val, std in zip(bars1, subject_means, subject_stds):
+        if val > 0:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2, height + std + 1.5,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    # Time-withheld
+    bars2 = ax2.bar(x, time_means, width, 
+                     yerr=time_stds, 
+                     capsize=6,
+                     color=all_colors, 
+                     edgecolor='white', 
+                     linewidth=1.5,
+                     error_kw={'linewidth': 1.5, 'ecolor': 'black', 'alpha': 0.7})
+    
+    ax2.set_title('Time-Withheld Cross-Validation', fontsize=14, pad=10)
+    ax2.set_ylabel('Accuracy (%)', fontsize=12)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(clean_labels, rotation=45, ha='right', fontsize=10)
+    ax2.set_ylim(0, 105)
+
+    ax2.grid(False)
+    ax2.set_axisbelow(True)
+    
+    for bar, val, std in zip(bars2, time_means, time_stds):
+        if val > 0:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2, height + std + 1.5,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    fig.suptitle('48D Interval-based Method Performance Comparison', fontsize=16, fontweight='bold')
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+    plt.show()
+    
+    print(f"48D Interval comparison saved to: {output_path}")
     return results

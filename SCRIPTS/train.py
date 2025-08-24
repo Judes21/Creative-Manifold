@@ -9,17 +9,21 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 import pickle
 from SCRIPTS.dataprep import prepare_data
 from SCRIPTS.models import BrainStateClassifier, BrainStateFullModel, AttentionFullModel
+from SCRIPTS.config import LOSS_WEIGHTS, TRAINING_CONFIG
 
 
 # MLP training for classification
-def train_and_evaluate(train_loader, test_loader, model, num_epochs=50, device=None):
+def train_and_evaluate(train_loader, test_loader, model, num_epochs=None, device=None):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using {device}")
     
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), 
+                                lr=TRAINING_CONFIG['learning_rate'], 
+                                weight_decay=TRAINING_CONFIG.get('weight_decay', 1e-5))
     
     train_losses = []
     train_accs = []
@@ -41,7 +45,8 @@ def train_and_evaluate(train_loader, test_loader, model, num_epochs=50, device=N
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             
             optimizer.zero_grad()
-            outputs = model(batch_X)
+            model_output = model(batch_X)
+            outputs = model_output.get('logits', model_output)  # Handle both dict and tensor returns
             loss = criterion(outputs, batch_y)
             loss.backward()
             optimizer.step()
@@ -71,7 +76,8 @@ def train_and_evaluate(train_loader, test_loader, model, num_epochs=50, device=N
             else:
                 batch_X, batch_y = batch[0], batch[1]
                 
-            outputs = model(batch_X.to(device))
+            model_output = model(batch_X.to(device))
+            outputs = model_output.get('logits', model_output)  # Handle both dict and tensor returns
             _, predicted = torch.max(outputs.data, 1)
     
             all_preds.extend(predicted.cpu().numpy())
@@ -104,14 +110,15 @@ def train_and_evaluate(train_loader, test_loader, model, num_epochs=50, device=N
 
 
 # Autoencoder + classifier training
-def train_autoencoder(train_loader, test_loader, num_epochs=50, latent_dim=48, split_name=""):
+def train_autoencoder(train_loader, test_loader, num_epochs=None, latent_dim=48, split_name=""):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using {device} device with latent dimension {latent_dim}")
     
     model = BrainStateFullModel(latent_dim=latent_dim).to(device)
     reconstruction_criterion = nn.MSELoss()
     classification_criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=TRAINING_CONFIG['learning_rate'])
     
     history = {
         'train_total_loss': [],
@@ -133,11 +140,21 @@ def train_autoencoder(train_loader, test_loader, num_epochs=50, latent_dim=48, s
         
         for batch_X, batch_y, batch_subjects, batch_times in train_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            x_recon, z, logits = model(batch_X)
+            model_output = model(batch_X)
+            x_recon = model_output['aux']['reconstruction']
+            z = model_output['aux']['latent']
+            logits = model_output['logits']
             
+            # Compute individual losses
             recon_loss = reconstruction_criterion(x_recon, batch_X)
             class_loss = classification_criterion(logits, batch_y)
-            total_loss = recon_loss + class_loss
+            
+            # Use unified loss aggregation
+            losses = {
+                'reconstruction': recon_loss,
+                'classification': class_loss
+            }
+            total_loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
         
             optimizer.zero_grad()
             total_loss.backward()
@@ -175,7 +192,8 @@ def train_autoencoder(train_loader, test_loader, num_epochs=50, latent_dim=48, s
     with torch.no_grad():
         for batch_X, batch_y, _, _ in test_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            _, _, logits = model(batch_X)
+            model_output = model(batch_X)
+            logits = model_output['logits']
             _, predicted = torch.max(logits.data, 1)
             
             test_total += batch_y.size(0)
@@ -197,7 +215,8 @@ def train_autoencoder(train_loader, test_loader, num_epochs=50, latent_dim=48, s
     with torch.no_grad():
         for loader in [train_loader, test_loader]:
             for batch_X, batch_y, batch_subjects, batch_times in loader:
-                _, z, _ = model(batch_X.to(device))
+                model_output = model(batch_X.to(device))
+                z = model_output['aux']['latent']
                 
                 for i, subject in enumerate(batch_subjects):
                     embeddings_dict[subject].append(z[i].cpu().numpy())
@@ -221,12 +240,13 @@ def train_autoencoder(train_loader, test_loader, num_epochs=50, latent_dim=48, s
 
 
 # Attention model training
-def train_attention_model(train_loader, test_loader, num_epochs=50, latent_dim=48, split_name=""):
+def train_attention_model(train_loader, test_loader, num_epochs=None, latent_dim=48, split_name=""):
+    num_epochs = num_epochs or TRAINING_CONFIG['epochs']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = AttentionFullModel(latent_dim=latent_dim).to(device)
     recon_loss_fn = nn.MSELoss()
     class_loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=TRAINING_CONFIG['learning_rate'])
     
     history = {
         'total_loss': [],
@@ -246,11 +266,21 @@ def train_attention_model(train_loader, test_loader, num_epochs=50, latent_dim=4
         
         for batch_X, batch_y, _, _ in train_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            x_recon, z, logits = model(batch_X)
+            model_output = model(batch_X)
+            x_recon = model_output['aux']['reconstruction']
+            z = model_output['aux']['latent']
+            logits = model_output['logits']
             
+            # Compute individual losses
             recon_loss = recon_loss_fn(x_recon, batch_X)
             class_loss = class_loss_fn(logits, batch_y)
-            total_loss = recon_loss + class_loss
+            
+            # Use unified loss aggregation
+            losses = {
+                'reconstruction': recon_loss,
+                'classification': class_loss
+            }
+            total_loss = sum(LOSS_WEIGHTS.get(k, 0.0) * v for k, v in losses.items())
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
@@ -292,7 +322,8 @@ def train_attention_model(train_loader, test_loader, num_epochs=50, latent_dim=4
     with torch.no_grad():
         for batch_X, batch_y, _, _ in test_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            _, _, logits = model(batch_X)
+            model_output = model(batch_X)
+            logits = model_output['logits']
             _, predicted = torch.max(logits, 1)
             
             test_total += batch_y.size(0)
@@ -309,7 +340,8 @@ def train_attention_model(train_loader, test_loader, num_epochs=50, latent_dim=4
     with torch.no_grad():
         for loader in [train_loader, test_loader]:
             for batch_X, batch_y, batch_subjects, batch_times in loader:
-                _, z, _ = model(batch_X.to(device))
+                model_output = model(batch_X.to(device))
+                z = model_output['aux']['latent']
     
                 for i, subject in enumerate(batch_subjects):
                     history['embeddings'][subject].append(z[i].cpu().numpy())

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from SCRIPTS.attention import NodeAttention
 
 
 class BaselineIntervalModel(nn.Module):
@@ -9,6 +10,9 @@ class BaselineIntervalModel(nn.Module):
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.seq_len = seq_len
+        
+        # Add node attention mechanism
+        self.node_attention = NodeAttention(num_nodes=48, use_sigmoid=False)
         
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, 512),
@@ -47,9 +51,11 @@ class BaselineIntervalModel(nn.Module):
         
     def encode_sequence(self, x):
         batch_size, seq_len, _ = x.shape
+        x_attended = self.node_attention(x)
+        
         latent_sequence = []
         for t in range(seq_len):
-            z_t = self.encoder(x[:, t, :])
+            z_t = self.encoder(x_attended[:, t, :])
             latent_sequence.append(z_t)
 
         latent_sequence = torch.stack(latent_sequence, dim=1)
@@ -75,7 +81,15 @@ class BaselineIntervalModel(nn.Module):
         
         logits = self.classifier(latent_flat)
         
-        return reconstructions, latent_sequence, logits
+        return {
+            'logits': logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': reconstructions,
+                'latent': latent_sequence
+            }
+        }
     
     def get_latent_representation(self, x):
         with torch.no_grad():

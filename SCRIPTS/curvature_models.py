@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from SCRIPTS.attention import NodeAttention
 
 #Manually calculate curvature of trajectories
 class DifferentiableCurvature(nn.Module):
@@ -62,6 +63,9 @@ class CurvatureModel(nn.Module):
     def __init__(self, input_dim=768, latent_dim=48, num_classes=3, drop_edges=5):
         super().__init__()
         
+        # Add node attention mechanism
+        self.node_attention = NodeAttention(num_nodes=48, use_sigmoid=False)
+        
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, 512),
             nn.BatchNorm1d(512),
@@ -92,7 +96,7 @@ class CurvatureModel(nn.Module):
         
         self.curvature = DifferentiableCurvature(drop_edges=drop_edges)
         
-        # Classifier on curvature features (400 timepoints - 2*drop_edges = 390 curvature values)
+        # 400 timepoints - 2*drop_edges = 390 curvature values
         curvature_dim = 390
         self.curvature_classifier = nn.Sequential(
             nn.Linear(curvature_dim, 256),
@@ -112,7 +116,9 @@ class CurvatureModel(nn.Module):
         
     def encode_sequence(self, x):
         batch_size, seq_len, feat_dim = x.shape
-        x_flat = x.view(-1, feat_dim)
+        x_attended = self.node_attention(x)
+        
+        x_flat = x_attended.view(-1, feat_dim)
         z_flat = self.encoder(x_flat)
         z = z_flat.view(batch_size, seq_len, -1)
         return z
@@ -129,7 +135,18 @@ class CurvatureModel(nn.Module):
         x_recon_flat = self.decoder(z_flat)
         x_recon = x_recon_flat.view(batch_size, seq_len, feat_dim)
         
+        result = {
+            'logits': class_logits,
+            'recon_loss': None,
+            'class_loss': None,
+            'aux': {
+                'reconstruction': x_recon,
+                'latent': z,
+                'curvature_values': curvature_values
+            }
+        }
+        
         if return_all:
             return class_logits, x_recon, z, curvature_values
         else:
-            return class_logits, x_recon
+            return result

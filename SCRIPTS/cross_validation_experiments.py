@@ -7,7 +7,7 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 
 from SCRIPTS.config import (
     CROSS_VALIDATION_RESULTS_DIR, COMBINED_FNIRS, COMBINED_SCATTERING, BASELINE_RESULTS_DIR, TOPOLOGICAL_RESULTS_DIR, CURVATURE_RESULTS_DIR, RNN_RESULTS_DIR,
-    DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, BASELINE_INTERVAL_RESULTS_DIR
+    DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, BASELINE_INTERVAL_RESULTS_DIR, CHECKPOINTS_DIR, COMBINED_MODEL_RESULTS_DIR
 )
 from SCRIPTS.dataprep import prepare_data, prepare_interval_data
 from SCRIPTS.models import BrainStateClassifier, BrainStateFullModel, AttentionFullModel
@@ -20,6 +20,8 @@ from SCRIPTS.curvature_models import CurvatureModel
 from SCRIPTS.curvature_training import train_curvature_model
 from SCRIPTS.baseline_interval_model import BaselineIntervalModel
 from SCRIPTS.baseline_interval_training import train_baseline_interval_model
+from SCRIPTS.combined_model_v2 import CombinedModelV2
+from SCRIPTS.combined_training_v2 import train_combined_model_v2
 
 #Point-wise baseline MLP
 def run_baseline_cross_validation(data_path, feature_prefix, split_type, num_trials=5, input_dim=768, num_epochs=DEFAULT_EPOCHS):
@@ -189,7 +191,7 @@ def run_attention_cross_validation(data_path, feature_prefix, split_type, latent
 
 
 # Topological model
-def run_topological_cross_validation(data_path, split_type, latent_dim=48, num_trials=5, num_epochs=DEFAULT_EPOCHS):
+def run_topological_cross_validation(data_path, split_type, latent_dim=48, num_trials=5, num_epochs=DEFAULT_EPOCHS, save_best_model=False):
     accuracies = []
     histories = []
     
@@ -210,12 +212,27 @@ def run_topological_cross_validation(data_path, split_type, latent_dim=48, num_t
             train_loader=train_loader,
             test_loader=test_loader,
             num_epochs=num_epochs,
-            lr=DEFAULT_LEARNING_RATE
+            lr=DEFAULT_LEARNING_RATE,
+            split_type=split_type,
+            latent_dim=latent_dim,
+            trial=trial
         )
         
         accuracy = 100 * np.mean(np.array(val_preds) == np.array(val_labels))
         accuracies.append(accuracy)
         histories.append(history)
+        
+        if save_best_model:
+            checkpoint_path = CHECKPOINTS_DIR / f'topological_{split_type}_{latent_dim}d_trial{trial}.pth'
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'accuracy': accuracy,
+                'trial': trial,
+                'split_type': split_type,
+                'latent_dim': latent_dim,
+                'model_type': 'topological'
+            }, checkpoint_path)
+            print(f"Model checkpoint saved: {checkpoint_path}")
     
     mean_accuracy = np.mean(accuracies)
     std_accuracy = np.std(accuracies)
@@ -241,7 +258,7 @@ def run_topological_cross_validation(data_path, split_type, latent_dim=48, num_t
 
 
 # RNN model
-def run_rnn_cross_validation(data_path, split_type, num_trials=5, num_epochs=DEFAULT_EPOCHS, latent_dim=48):
+def run_rnn_cross_validation(data_path, split_type, num_trials=5, num_epochs=DEFAULT_EPOCHS, latent_dim=48, save_best_model=False):
     accuracies = []
     histories = []
 
@@ -267,11 +284,26 @@ def run_rnn_cross_validation(data_path, split_type, num_trials=5, num_epochs=DEF
             train_loader=train_loader,
             test_loader=test_loader,
             num_epochs=num_epochs,
-            lr=DEFAULT_LEARNING_RATE
+            lr=DEFAULT_LEARNING_RATE,
+            split_type=split_type,
+            latent_dim=latent_dim,
+            trial=trial
         )
 
         accuracies.append(history['val_acc'][-1])
         histories.append(history)
+        
+        if save_best_model:
+            checkpoint_path = CHECKPOINTS_DIR / f'rnn_{split_type}_{latent_dim}d_trial{trial}.pth'
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'accuracy': history['val_acc'][-1],
+                'trial': trial,
+                'split_type': split_type,
+                'latent_dim': latent_dim,
+                'model_type': 'rnn'
+            }, checkpoint_path)
+            print(f"Model checkpoint saved: {checkpoint_path}")
 
     mean_accuracy = np.mean(accuracies)
     std_accuracy = np.std(accuracies)
@@ -296,7 +328,7 @@ def run_rnn_cross_validation(data_path, split_type, num_trials=5, num_epochs=DEF
     return results
 
 # Curvature model
-def run_curvature_cross_validation(data_path, split_type, latent_dim=48, num_trials=5, num_epochs=DEFAULT_EPOCHS):
+def run_curvature_cross_validation(data_path, split_type, latent_dim=48, num_trials=5, num_epochs=DEFAULT_EPOCHS, save_best_model=False):
     accuracies = []
     histories = []
     
@@ -311,7 +343,6 @@ def run_curvature_cross_validation(data_path, split_type, latent_dim=48, num_tri
             random_state=random_seed
         )
         
-        # Convert DataLoader to intervals
         train_intervals = []
         for batch in train_loader:
             features, labels, subjects, intervals = batch
@@ -340,11 +371,25 @@ def run_curvature_cross_validation(data_path, split_type, latent_dim=48, num_tri
             latent_dim=latent_dim,
             num_epochs=num_epochs,
             batch_size=16,
-            learning_rate=DEFAULT_LEARNING_RATE
+            learning_rate=DEFAULT_LEARNING_RATE,
+            split_type=split_type,
+            trial=trial
         )
         
         accuracies.append(history['test_acc'][-1])
         histories.append(history)
+        
+        if save_best_model:
+            checkpoint_path = CHECKPOINTS_DIR / f'curvature_{split_type}_{latent_dim}d_trial{trial}.pth'
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'accuracy': history['test_acc'][-1],
+                'trial': trial,
+                'split_type': split_type,
+                'latent_dim': latent_dim,
+                'model_type': 'curvature'
+            }, checkpoint_path)
+            print(f"Model checkpoint saved: {checkpoint_path}")
     
     mean_accuracy = np.mean(accuracies)
     std_accuracy = np.std(accuracies)
@@ -402,7 +447,10 @@ def run_baseline_interval_cross_validation(data_path, split_type, latent_dim=48,
             num_epochs=num_epochs,
             lr=DEFAULT_LEARNING_RATE,
             recon_weight=recon_weight,
-            device=device
+            device=device,
+            split_type=split_type,
+            latent_dim=latent_dim,
+            trial=trial
         )
         
         final_accuracy = history['val_acc'][-1]
@@ -432,3 +480,138 @@ def run_baseline_interval_cross_validation(data_path, split_type, latent_dim=48,
     print(f"Accuracy: {mean_accuracy:.1f}% ± {std_accuracy:.1f}%")
     
     return results
+
+
+# Combined model
+def run_combined_cross_validation(data_path, split_types=['subject', 'time'], 
+                                 latent_dims=[8, 48], num_trials=5, num_epochs=50, save_best_model=False):
+    
+    all_results = {}
+    
+    for split_type in split_types:
+        for latent_dim in latent_dims:
+            accuracies = []
+            histories = []
+            
+            for trial in range(num_trials):
+                print(f"\n=== Combined Model Trial {trial+1}/{num_trials} ({split_type} split, {latent_dim}D) ===")
+                random_seed = 42 + trial
+                
+                train_loader, test_loader, info = prepare_interval_data(
+                    scattering_data_path=data_path,
+                    split_type=split_type,
+                    batch_size=DEFAULT_BATCH_SIZE,
+                    random_state=random_seed
+                )
+                
+                model, history = train_combined_model(
+                    train_loader=train_loader,
+                    test_loader=test_loader,
+                    latent_dim=latent_dim,
+                    split_type=split_type,
+                    num_epochs=num_epochs,
+                    lr=DEFAULT_LEARNING_RATE,
+                    trial=trial
+                )
+                
+                accuracies.append(history['val_acc'][-1])
+                histories.append(history)
+                
+                if save_best_model:
+                    checkpoint_path = CHECKPOINTS_DIR / f'combined_{split_type}_{latent_dim}d_trial{trial}.pth'
+                    torch.save({
+                        'model_state_dict': model.state_dict(),
+                        'accuracy': history['val_acc'][-1],
+                        'trial': trial,
+                        'split_type': split_type,
+                        'latent_dim': latent_dim,
+                        'model_type': 'combined'
+                    }, checkpoint_path)
+                    print(f"Model checkpoint saved: {checkpoint_path}")
+            
+            mean_accuracy = np.mean(accuracies)
+            std_accuracy = np.std(accuracies)
+            
+            results = {
+                'accuracies': accuracies,
+                'mean_accuracy': mean_accuracy,
+                'std_accuracy': std_accuracy,
+                'histories': histories,
+                'split_type': split_type,
+                'latent_dim': latent_dim
+            }
+            
+            save_path = COMBINED_MODEL_RESULTS_DIR / f'combined_{split_type}_{latent_dim}d_cv_results.pkl'
+            with open(save_path, 'wb') as f:
+                pickle.dump(results, f)
+            print(f"Results saved to: {save_path}")
+            
+            print(f"\n=== Combined Results ({split_type} split, {latent_dim}D) ===")
+            print(f"Accuracy: {mean_accuracy:.1f}% ± {std_accuracy:.1f}%")
+            
+            # Store in all_results
+            result_key = f"{split_type}_{latent_dim}d"
+            all_results[result_key] = results
+    
+    return all_results
+
+
+# Combined model V2
+def run_combined_v2_cross_validation(data_path, split_types=['subject', 'time'], 
+                                    latent_dims=[8, 48], num_trials=5, num_epochs=100):
+    all_results = {}
+    
+    for split_type in split_types:
+        for latent_dim in latent_dims:
+            accuracies = []
+            histories = []
+            
+            for trial in range(num_trials):
+                print(f"\n=== Combined Model V2 Trial {trial+1}/{num_trials} ({split_type} split, {latent_dim}D) ===")
+                random_seed = 42 + trial
+                
+                train_loader, test_loader, info = prepare_interval_data(
+                    scattering_data_path=data_path,
+                    split_type=split_type,
+                    batch_size=DEFAULT_BATCH_SIZE,
+                    random_state=random_seed
+                )
+                
+                model, history = train_combined_model_v2(
+                    train_loader=train_loader,
+                    test_loader=test_loader,
+                    latent_dim=latent_dim,
+                    split_type=split_type,
+                    num_epochs=num_epochs,
+                    learning_rate=DEFAULT_LEARNING_RATE,
+                    trial=trial
+                )
+                
+                accuracies.append(history['final_accuracy'])
+                histories.append(history)
+            
+            mean_accuracy = np.mean(accuracies)
+            std_accuracy = np.std(accuracies)
+            
+            results = {
+                'accuracies': accuracies,
+                'mean_accuracy': mean_accuracy,
+                'std_accuracy': std_accuracy,
+                'histories': histories,
+                'split_type': split_type,
+                'latent_dim': latent_dim
+            }
+            
+            save_path = COMBINED_MODEL_RESULTS_DIR / f'combined_v2_{split_type}_{latent_dim}d_cv_results.pkl'
+            with open(save_path, 'wb') as f:
+                pickle.dump(results, f)
+            print(f"Results saved to: {save_path}")
+            
+            print(f"\n=== Combined V2 Results ({split_type} split, {latent_dim}D) ===")
+            print(f"Accuracy: {mean_accuracy:.1f}% ± {std_accuracy:.1f}%")
+            
+            # Store in all_results
+            result_key = f"{split_type}_{latent_dim}d"
+            all_results[result_key] = results
+    
+    return all_results
